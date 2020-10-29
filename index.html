@@ -1,0 +1,1009 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Spotify Data Tool</title>
+    <link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css">
+    <style type="text/css">
+      #login, #loggedin {
+        display: none;
+      }
+      .text-overflow {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        width: 500px;
+      }
+      #login-button {
+        margin: 0;
+        position: absolute;
+        top: 35%;
+        left: 50%;
+        transform: translate(-50%);
+        -webkit-transform: translate(-50%);
+        -ms-transform: translate(-50%);
+        background-color: #1DB954;
+      }
+      #login-header {
+        margin: 0;
+        position: absolute;
+        top: 25%;
+        left: 50%;
+        transform: translate(-50%);
+        -webkit-transform: translate(-50%);
+        -ms-transform: translate(-50%);
+      }
+      .container {
+        width: 97%;
+      }
+      #svg-container {
+        width: 100%;
+        text-align: center;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <div id="login">
+        <h1 id="login-header">Spotify Data Tool</h1>
+        <button id="login-button" class="btn btn-primary">Login with Spotify</button>
+      </div>
+      <div id="loggedin">
+        <div id="user-profile">
+        </div>
+        <div id="oauth">
+        </div>
+      </div>
+    </div>
+
+    <script id="user-profile-template" type="text/x-handlebars-template">
+      <style type="text/css">
+        #tracks-count-input {
+          width: 64px;
+        }
+        #artists-count-input {
+          width: 64px;
+        }
+        .track-artist {
+          font-size: 10px;
+        }
+        .track-title {
+          font-size: 8px;
+        }
+      </style>
+      <div class="top-tracks">
+        <div class="user-track-stats">
+          <h1 id="stats-view-title">
+            These Are Your Top
+            <input id="tracks-count-input" type="number" min="10" max="50" step="1" value="10">
+            Tracks
+          </h1>
+        </div>
+      </div>
+      <div class="top-tracks-popularity">
+        <h1>This is How Popular They Are</h1>
+        <div id="track_pop"></div>
+        <h1>Quantity of Saved Tracks Over Time</h1>
+        <div id="time_track"></div>
+      </div>
+      <div class="top-artists">
+        <div class="user-artist-stats">
+          <h1 id="stats-view-title">
+            These Are Your Top
+            <input id="artists-count-input" type="number" min="10" max="50" step="1" value="10">
+            Artists
+          </h1>
+        </div>
+      </div>
+      <div class="top-artists-popularity">
+        <h1>This is How Popular They Are</h1>
+        <svg id = "mySvg"></svg>
+      </div>
+    </script>
+
+    <script id="oauth-template" type="text/x-handlebars-template">
+      <h2>oAuth info</h2>
+      <dl class="dl-horizontal">
+        <dt>Access token</dt><dd class="text-overflow">{{access_token}}</dd>
+      </dl>
+    </script>
+
+    <script src="//cdnjs.cloudflare.com/ajax/libs/handlebars.js/2.0.0-alpha.1/handlebars.min.js"></script>
+    <script src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script>
+      (function() {
+        var stateKey = 'spotify_auth_state';
+
+        /**
+         * Obtains parameters from the hash of the URL
+         * @return Object
+         */
+        function getHashParams() {
+          var hashParams = {};
+          var e, r = /([^&;=]+)=?([^&;]*)/g,
+              q = window.location.hash.substring(1);
+          while ( e = r.exec(q)) {
+             hashParams[e[1]] = decodeURIComponent(e[2]);
+          }
+          return hashParams;
+        }
+
+        /**
+         * Generates a random string containing numbers and letters
+         * @param  {number} length The length of the string
+         * @return {string} The generated string
+         */
+        function generateRandomString(length) {
+          var text = '';
+          var possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+          for (var i = 0; i < length; i++) {
+            text += possible.charAt(Math.floor(Math.random() * possible.length));
+          }
+          return text;
+        };
+
+        var userProfileSource = document.getElementById('user-profile-template').innerHTML,
+            userProfileTemplate = Handlebars.compile(userProfileSource),
+            userProfilePlaceholder = document.getElementById('user-profile');
+
+            oauthSource = document.getElementById('oauth-template').innerHTML,
+            oauthTemplate = Handlebars.compile(oauthSource),
+            oauthPlaceholder = document.getElementById('oauth');
+
+        var params = getHashParams();
+
+        var access_token = params.access_token,
+            state = params.state,
+            storedState = localStorage.getItem(stateKey);
+
+        if (access_token && (state == null || state !== storedState)) {
+          alert('There was an error during the authentication');
+        } else {
+          localStorage.removeItem(stateKey);
+          if (access_token) {
+            $.ajax({
+                url: 'https://api.spotify.com/v1/me/top/tracks?limit=50&offset=0&time_range=long_term',
+                headers: {
+                  'Authorization': 'Bearer ' + access_token
+                },
+                success: function(response) {
+                  console.log(response);
+                  userProfilePlaceholder.innerHTML = userProfileTemplate();
+
+                  // SET UP SVG
+                  var trackSize = 125;
+                  var width = 1250, height = 125;
+                  var svg = d3.select(".user-track-stats")
+                  .append("svg")
+                  .attr("width", width)
+                  .attr("height", height);
+
+                  var data = response.items;
+
+                  var x = 0, y = 0;
+                  var tracks = [];
+                  for (var i = 0; i < data.length; i++) {
+                    var artist = data[i].artists[0].name;
+                    var title = data[i].name;
+                    var albumCover = data[i].album.images[1].url;
+                    var track = {
+                      "artist": artist,
+                      "title": title,
+                      "x": x,
+                      "y": y,
+                      "width": trackSize,
+                      "height": trackSize,
+                      "url": albumCover
+                    };
+                    x += trackSize;
+                    if (x == width) {
+                      x = 0;
+                      y += trackSize;
+                    }
+                    tracks.push(track);
+                  }
+
+                  var numDisplayed = 10;
+
+                  // DISPLAY TRACK TITLES
+                  svg.selectAll("text")
+                  .data(tracks)
+                  .enter()
+                  .append("text")
+                  .attr("class", "track-info")
+                  .attr("x", d => d.x + 2.5)
+                  .attr("y", d => d.y + d.height)
+                  .attr("opacity", 0)
+                  .append("tspan")
+                  .attr("class", "track-artist")
+                  .attr("x", d => d.x + 2.5)
+                  .attr("dy", -15)
+                  .text(d => d.artist.length <= 30 ? d.artist : d.artist.substring(0, 29) + "...")
+                  .append("tspan")
+                  .attr("class", "track-title")
+                  .attr("x", d => d.x + 2.5)
+                  .attr("dy", 10)
+                  .text(d => d.title.length <= 30 ? d.title : d.title.substring(0, 29) + "...");
+                  svg.selectAll(".track-info")
+                  .transition()
+                  .duration(1000)
+                  .delay((d, i) => i * 50)
+                  .attr("opacity", (d, i) => i < numDisplayed ? 1 : 0);
+
+                  // DISPLAY TRACKS
+                  svg.selectAll("image")
+                  .data(tracks)
+                  .enter()
+                  .append("image")
+                  .attr("class", "track")
+                  .attr("x", d => d.x)
+                  .attr("y", d => d.y)
+                  .attr("width", d => 0)
+                  .attr("height", d => 0)
+                  .attr("xlink:href", d => d.url)
+                  .transition()
+                  .duration(400)
+                  .delay((d, i) => i * 50)
+                  .attr("width", (d, i) => i < numDisplayed ? d.width : 0)
+                  .attr("height", (d, i) => i < numDisplayed ? d.height : 0);
+
+                  // HANDLE TRACK HOVER
+                  $(document).on("mouseenter", ".track", function(event) {
+                    d3.select(this)
+                    .transition()
+                    .duration(70)
+                    .attr("y", d => d.y - 30);
+                  });
+                  $(document).on("mouseleave", ".track", function(event) {
+                    d3.select(this)
+                    .transition()
+                    .duration(70)
+                    .attr("y", d => d.y);
+                  });
+
+                  // HANDLE CHANGE DATA AMOUNT
+                  $(document).on("change", "#tracks-count-input", function(event) {
+                    var value = d3.select(this).property("value");
+                    svg.attr("height", 125 * Math.ceil(value / 10));
+                    svg.selectAll(".track")
+                    .transition()
+                    .duration(400)
+                    .delay((d, i) => value > numDisplayed ? (i - numDisplayed - 1) * 50 : (numDisplayed - 1 - i) * 50)
+                    .attr("width", (d, i) => i < value ? d.width : 0)
+                    .attr("height", (d, i) => i < value ? d.height : 0);
+                    svg.selectAll(".track-info")
+                    .transition()
+                    .duration((d, i) => value > numDisplayed ? 1000 : 0)
+                    .delay((d, i) => value > numDisplayed ? (i - numDisplayed - 1) * 50 : (numDisplayed - 1 - i) * 50)
+                    .attr("opacity", (d, i) => i < value ? 1 : 0);
+                    numDisplayed = value;
+                  });
+
+                  $.ajax({
+                    url: 'https://api.spotify.com/v1/me/tracks',
+                    headers: {
+                      'Authorization': 'Bearer ' + access_token
+                    },
+                    success: function(response) {
+                      // making an object that stores the response.items
+                      var data_items = response.items;
+
+                      var margin_ta = {top: 20, right: 20, bottom: 40, left: 40},
+                      width_ta = 1000 - margin_ta.left - margin_ta.right,
+                      height_ta = 500 - margin_ta.top - margin_ta.bottom;
+
+                      var svg_ta = d3.select("#time_track")
+                        .append("svg")
+                          .attr("width", width_ta + margin_ta.left + margin_ta.right)
+                          .attr("height", height_ta + margin_ta.top + margin_ta.bottom)
+                        .append("g")
+                          .attr("transform",
+                                "translate(" + margin_ta.left + "," + margin_ta.top + ")");
+
+                      // trim added_at to only have yyyy-mm-dd without time value
+                      for (var i=0; i<data_items.length; i++) {
+                        data_items[i].added_at = data_items[i].added_at.substring(0, 10)
+                      }
+
+                      // nesting the track data by seeing quantity of tracks added by month
+                      var month_track_data = d3.nest()
+                      .key(function(d) { return d.added_at; })
+                      .sortKeys(d3.ascending)
+                      .key(function(d) { return d.track_name; })
+                      .rollup(function(leaves) {
+                          return leaves.length;
+                      })
+                      .entries(data_items);
+
+                      // parses data to get a monthly view
+                      var parseDate = d3.timeParse("%Y-%m-%d");
+                      var parsed_ta_data = month_track_data.map(d => {d.key = parseDate(d.key); return d})
+
+                      var x_ta = d3.scaleTime()
+                        .domain([d3.min(parsed_ta_data, function(d) { return d.key; } ),
+                            d3.max(parsed_ta_data, function(d) { return d.key; } )])
+                        .range([50, width_ta]);
+
+                      var y_ta = d3.scaleLinear()
+                        .domain([0, d3.max(parsed_ta_data, function(d) { return + d.values[0].value; })])
+                        .range([height_ta, 0]);
+
+                      svg_ta.append("g")
+                        .attr("transform", "translate(0," + height_ta + ")")
+                        .call(d3.axisBottom(x_ta));
+
+                      svg_ta.append("g")
+                        .attr("transform", "translate(50, 0)")
+                        .call(d3.axisLeft(y_ta));
+
+                      // adding line
+                      svg_ta.append("path")
+                        .datum(parsed_ta_data)
+                        .attr("fill", "none")
+                        .attr("stroke", "black")
+                        .attr("stroke-width", 1.5)
+                        .attr("d", d3.line()
+                          .x(function(d) { return x_ta(d.key) })
+                          .y(function(d) { return y_ta(d.values[0].value) })
+                        )
+
+                      // x-axis label
+                      svg_ta.append("text")
+                        .attr("transform",
+                              "translate(" + (width_ta/2) + " ," +
+                                            (height_ta + margin_ta.top + 20) + ")")
+                        .style("text-anchor", "middle")
+                        .text("Time");
+
+                      // y-axis label
+                      svg_ta.append("text")
+                        .attr("transform", "rotate(-90)")
+                        .attr("y", 0 - margin_ta.left)
+                        .attr("x",0 - (height_ta / 2))
+                        .attr("dy", "1em")
+                        .style("text-anchor", "middle")
+                        .text("Quantity of Saved Tracks");
+
+
+                      // code for tooltip with mouse hover
+                      var Tooltip_ta = d3.select("#time_track")
+                          .append("div")
+                          .style("opacity", 0)
+                          .attr("class", "tooltip")
+                          .style("background-color", "white")
+                          .style("border", "solid")
+                          .style("border-width", "2px")
+                          .style("border-radius", "5px")
+                          .style("padding", "5px")
+
+                      var mouseover_ta = function(d) {
+                        Tooltip_ta.style("opacity", 1)
+                      }
+                      var mousemove_ta = function(d) {
+                        Tooltip_ta.style("display", "inline-block")
+                          .style("left", d3.event.pageX - 50 + "px")
+                          .style("top", d3.event.pageY - 50 + "px")
+                          .html("Track(s) Added: " + d.values[0].value + "<br>"
+                                + "Date: " + d.key)
+                      }
+                      var mouseleave_ta = function(d) {
+                        Tooltip_ta.style("opacity", 0)
+                      }
+
+                      // adding points to the line for tooltip
+                      svg_ta
+                        .append("g")
+                        .selectAll("dot")
+                        .data(parsed_ta_data)
+                        .enter()
+                        .append("circle")
+                          .attr("class", "circles")
+                          .attr("cx", function(d) { return x_ta(d.key) } )
+                          .attr("cy", function(d) { return y_ta(d.values[0].value) } )
+                          .attr("r", 8)
+                          .attr("stroke", "#1db954")
+                          .attr("stroke-width", 3)
+                          .attr("fill", "white")
+                          .on("mouseover", mouseover_ta)
+                          .on("mousemove", mousemove_ta)
+                          .on("mouseleave", mouseleave_ta)
+
+
+                      // ----------- CODE FOR TRACK VS POPULARITY ----------
+                      var total_track_pop_data = []
+                      var vals = []
+                      var artists = ''
+
+                      var mouseover_ap = function(d) {
+                        Tooltip_ta.style("opacity", 1);
+                        //changes color of bar based on hover
+                        d3.select(this).attr('fill', '#1db954')
+                      }
+                      var mousemove_ap = function(d) {
+                        Tooltip_ta.style("display", "inline-block")
+                          .style("left", d3.event.pageX - 50 + "px")
+                          .style("top", d3.event.pageY - 50 + "px")
+                          .html("Track: " + d.key + " (" + d.value[2] + ") <br> Popularity: " + d.value[1]);
+                        //changes color of bar based on hover
+                        d3.select(this).attr('fill', '#1db954')
+                      }
+                      var mouseleave_ap = function(d) {
+                        Tooltip_ta.style("opacity", 0)
+                        //changes color of bar based on hover
+                        d3.select(this).attr('fill', '#000000')
+                      }
+
+                      var svg_ap = d3.select("#track_pop")
+                        .append("svg")
+                          .attr("width", width_ta + margin_ta.left + margin_ta.right)
+                          .attr("height", height_ta + margin_ta.top + margin_ta.bottom)
+                        .append("g")
+                          .attr("transform",
+                                "translate(" + margin_ta.left + "," + -80 + ")");
+
+                      // read through the data and store in dictionary
+                      /* format is as follows for value array:
+                          [0]: shortened track name
+                          [1]: popularity rating
+                          [2]: artists in a String
+                      */
+                      for (var i=0; i < data.length; i++) {
+                        // if the length of the track title is greater than 10 put a shortened version
+                        if (data[i].name.length > 10) {
+                          vals.push(data[i].name.substring(0, 7) + "...")
+                        }
+                        else {
+                          vals.push(data[i].name)
+                        }
+
+                        // push full popularity into artists value
+                        vals.push(data[i].popularity)
+
+                        // appends artists to value array of dict as string
+                        for (var j=0; j < data[i].artists.length; j++) {
+                          artists = artists.concat(data[i].artists[j].name)
+                          if (j < data[i].artists.length - 1) {
+                            artists = artists.concat(", ")
+                          }
+                          else {
+                            vals.push(artists)
+                          }
+                        }
+
+                        // make the dict with the key being the track name and the value being the rest
+                        total_track_pop_data.push({
+                            key:   data[i].name,
+                            value: vals
+                        })
+
+                        // clear value array and string for next iteration
+                        vals = []
+                        artists = ''
+                      }
+
+                      var track_pop_data = [];
+                      track_pop_data = total_track_pop_data.slice(0, 10);
+
+                      var x_ap = d3.scaleBand()
+                        .range([50, width_ta])
+                        .padding(0.25);
+
+                      var y_ap = d3.scaleLinear()
+                        .domain([0, 100])
+                        .range([height_ta-50, 100]);
+
+                      var tooltip = d3.select("body").append("div").attr("class", "toolTip");
+
+                      // set the domain for the x and y axis'
+                      x_ap.domain(track_pop_data.map(function(d) { return d.value[0]; }));
+                      y_ap.domain([0, 100]);
+
+                      // add the x Axis
+                      svg_ap.append("g")
+                          .attr("transform", "translate(0," + (height_ta - 50)+ ")")
+                          .call(d3.axisBottom(x_ap))
+                          .selectAll("text")
+                          .style("text-anchor", "end")
+                          .attr("dx", "-.8em")
+                          .attr("dy", ".15em")
+                          .attr("transform", "rotate(-65)");
+
+                      // add the y Axis
+                      svg_ap.append("g")
+                          .attr("transform", "translate(50)")
+                          .call(d3.axisLeft(y_ap));
+
+                      // append the rectangles for the bar chart
+                      svg_ap.selectAll(".bar")
+                          .data(track_pop_data)
+                        .enter().append("rect")
+                          .attr("class", "bar")
+                          .attr("x", function(d) { return x_ap(d.value[0]); })
+                          .attr("width", x_ap.bandwidth())
+                          .attr("y", function(d) { return y_ap(d.value[1]); })
+                          .attr("height", function(d) { return height_ta - y_ap(d.value[1]) - 50 ; })
+                          .on("mouseover", mouseover_ap)
+                          .on("mousemove", mousemove_ap)
+                          .on("mouseleave", mouseleave_ap);
+
+                      // x-axis label
+                      svg_ap.append("text")
+                        .attr("transform",
+                              "translate(" + (width_ta/2) + " ," +
+                                            (height_ta + margin_ta.top + 20) + ")")
+                        .style("text-anchor", "middle")
+                        .text("Track");
+
+                      // y-axis label
+                      svg_ap.append("text")
+                        .attr("transform", "rotate(-90)")
+                        .attr("y", 0 - margin_ta.left)
+                        .attr("x", 0 - (height_ta / 2))
+                        .attr("dy", "1em")
+                        .style("text-anchor", "middle")
+                        .text("Popularity Rating");
+
+                      // HANDLE CHANGE DATA AMOUNT
+                      $(document).on("change", "#tracks-count-input", function(event) {
+                        var value = d3.select(this).property("value");
+                        svg_ap.selectAll("*").remove();
+
+                        track_pop_data = total_track_pop_data.slice(0, value);
+
+                        var x_ap = d3.scaleBand()
+                          .range([50, width_ta])
+                          .padding(0.25);
+
+                        var y_ap = d3.scaleLinear()
+                          .domain([0, 100])
+                          .range([height_ta-50, 100]);
+
+                        var tooltip = d3.select("body").append("div").attr("class", "toolTip");
+
+                        // set the domain for the x and y axis'
+                        x_ap.domain(track_pop_data.map(function(d) { return d.value[0]; }));
+                        y_ap.domain([0, 100]);
+
+                        // add the x Axis
+                        svg_ap.append("g")
+                            .attr("transform", "translate(0," + (height_ta - 50)+ ")")
+                            .call(d3.axisBottom(x_ap))
+                            .selectAll("text")
+                            .style("text-anchor", "end")
+                            .attr("dx", "-.8em")
+                            .attr("dy", ".15em")
+                            .attr("transform", "rotate(-65)");
+
+                        // add the y Axis
+                        svg_ap.append("g")
+                            .attr("transform", "translate(50)")
+                            .call(d3.axisLeft(y_ap));
+
+                        // append the rectangles for the bar chart
+                        svg_ap.selectAll(".bar")
+                            .data(track_pop_data)
+                          .enter().append("rect")
+                            .attr("class", "bar")
+                            .attr("x", function(d) { return x_ap(d.value[0]); })
+                            .attr("width", x_ap.bandwidth())
+                            .attr("y", function(d) { return y_ap(d.value[1]); })
+                            .attr("height", function(d) { return height_ta - y_ap(d.value[1]) - 50 ; })
+                            .on("mouseover", mouseover_ap)
+                            .on("mousemove", mousemove_ap)
+                            .on("mouseleave", mouseleave_ap);
+
+                        // x-axis label
+                        svg_ap.append("text")
+                          .attr("transform",
+                                "translate(" + (width_ta/2) + " ," +
+                                              (height_ta + margin_ta.top + 20) + ")")
+                          .style("text-anchor", "middle")
+                          .text("Track");
+
+                        // y-axis label
+                        svg_ap.append("text")
+                          .attr("transform", "rotate(-90)")
+                          .attr("y", 0 - margin_ta.left)
+                          .attr("x", 0 - (height_ta / 2))
+                          .attr("dy", "1em")
+                          .style("text-anchor", "middle")
+                          .text("Popularity Rating");
+                      });
+
+                      $.ajax({
+                          url: 'https://api.spotify.com/v1/me/top/artists?limit=50&offset=0&time_range=long_term',
+                          headers: {
+                            'Authorization': 'Bearer ' + access_token
+                          },
+                          success: function(response) {
+                            var margin = {top: 0, right: 20, bottom: 30, left: 40},
+                                svgwidth = 1250 - margin.left - margin.right,
+                                svgheight = 300 - margin.top - margin.bottom;
+
+                            const adj = 30;
+
+                            var total_artist_data = response.items;
+
+                            var artistData = response.items.slice(0, 10);
+
+                            // TOP ARTISTS VIEW
+                            // SET UP SVG
+                            var artistSize = 125;
+                            var width = 1250, height = 125;
+                            var artistSvg = d3.select(".user-artist-stats")
+                            .append("svg")
+                            .attr("width", width)
+                            .attr("height", height);
+
+                            var x = 0, y = 0;
+                            var artists = [];
+                            for (var i = 0; i < total_artist_data.length; i++) {
+                              var artist = total_artist_data[i].name;
+                              var artistImage = total_artist_data[i].images[1].url;
+                              var artist = {
+                                "artist": artist,
+                                "x": x,
+                                "y": y,
+                                "width": artistSize,
+                                "height": artistSize,
+                                "url": artistImage
+                              };
+                              x += artistSize;
+                              if (x == width) {
+                                x = 0;
+                                y += artistSize;
+                              }
+                              artists.push(artist);
+                            }
+
+                            var numDisplayedArtists = 10;
+
+                            // DISPLAY ARTIST TITLES
+                            artistSvg.selectAll("text")
+                            .data(artists)
+                            .enter()
+                            .append("text")
+                            .attr("class", "artist-info")
+                            .attr("x", d => d.x + 2.5)
+                            .attr("y", d => d.y + d.height)
+                            .attr("opacity", 0)
+                            .append("tspan")
+                            .attr("class", "track-artist")
+                            .attr("x", d => d.x + 2.5)
+                            .attr("dy", -15)
+                            .text(d => d.artist.length <= 30 ? d.artist : d.artist.substring(0, 29) + "...");
+                            artistSvg.selectAll(".artist-info")
+                            .transition()
+                            .duration(1000)
+                            .delay((d, i) => i * 50)
+                            .attr("opacity", (d, i) => i < numDisplayedArtists ? 1 : 0);
+
+                            // DISPLAY ARTISTS
+                            artistSvg.selectAll("image")
+                            .data(artists)
+                            .enter()
+                            .append("image")
+                            .attr("class", "artist")
+                            .attr("x", d => d.x)
+                            .attr("y", d => d.y)
+                            .attr("width", d => 0)
+                            .attr("height", d => 0)
+                            .attr("xlink:href", d => d.url)
+                            .transition()
+                            .duration(400)
+                            .delay((d, i) => i * 50)
+                            .attr("width", (d, i) => i < numDisplayedArtists ? d.width : 0)
+                            .attr("height", (d, i) => i < numDisplayedArtists ? d.height : 0);
+
+                            // HANDLE TRACK HOVER
+                            $(document).on("mouseenter", ".artist", function(event) {
+                              d3.select(this)
+                              .transition()
+                              .duration(70)
+                              .attr("y", d => d.y - 30);
+                            });
+                            $(document).on("mouseleave", ".artist", function(event) {
+                              d3.select(this)
+                              .transition()
+                              .duration(70)
+                              .attr("y", d => d.y);
+                            });
+
+                            // HANDLE CHANGE DATA AMOUNT
+                            $(document).on("change", "#artists-count-input", function(event) {
+                              var value = d3.select(this).property("value");
+                              artistSvg.attr("height", 125 * Math.ceil(value / 10));
+                              artistSvg.selectAll(".artist")
+                              .transition()
+                              .duration(400)
+                              .delay((d, i) => value > numDisplayedArtists ? (i - numDisplayedArtists - 1) * 50 : (numDisplayedArtists - 1 - i) * 50)
+                              .attr("width", (d, i) => i < value ? d.width : 0)
+                              .attr("height", (d, i) => i < value ? d.height : 0);
+                              artistSvg.selectAll(".artist-info")
+                              .transition()
+                              .duration((d, i) => value > numDisplayedArtists ? 1000 : 0)
+                              .delay((d, i) => value > numDisplayedArtists ? (i - numDisplayedArtists - 1) * 50 : (numDisplayedArtists - 1 - i) * 50)
+                              .attr("opacity", (d, i) => i < value ? 1 : 0);
+                              numDisplayedArtists = value;
+                            });
+
+                            // SVG FOR ARTISTS POPULARITY GRAPH
+                            //Setting up the x-axis
+                            var x  = d3.scaleBand().rangeRound([0, svgwidth], .5);
+                            var xAxis = d3.axisBottom().scale(x)
+                            x.domain(artistData.map(d=>d.name))
+
+                            //Setting up the y-axis
+                            var y   = d3.scaleLinear().domain([0, 100]).nice().rangeRound([svgheight, 0]);
+                            var yAxis = d3.axisLeft().scale(y);
+                            y.domain([0,100])
+
+                            const color = d3.scaleOrdinal(d3.schemeCategory10);
+                            var cScale = d3.scaleOrdinal().domain(d=> d).range(d3.schemeCategory10);
+
+                            //Creating the svg object
+                            var mysvg = d3.select("#mySvg")
+                            .attr("viewBox", "-"
+                            + adj + " -"
+                            + adj + " "
+                            + (svgwidth + adj * 5) + " "
+                            + (svgheight + adj * 5))
+                            .attr("overflow","visible").attr("overflow","visible")
+                            .append('g').attr('transform', 'translate(' +  margin.left + ',' +  margin.top + ')');
+
+                            //creating the tooptip for mouseover events
+                            const tooltipDiv =
+                            mysvg.append("g")
+                            .style("background-color", "white")
+                            .style("border", "solid")
+                            .style("border-width", "2px")
+                            .style("border-radius", "5px")
+                            .style("padding", "5px")
+
+                            tooltipDiv.append("text");
+
+                            //adding x-axis to the svg element
+                            mysvg.append("g").attr("class", "axis axis--x").attr("transform", "translate(0," + svgheight + ")")
+                              .call(xAxis).selectAll("text")
+                              .style("text-anchor", "end")
+                              .attr("dx", "-.8em")
+                              .attr("dy", ".15em")
+                              .attr("transform", function(d) {
+                                        return "rotate(-65)"
+                              });
+                            //adding y-axis to the svg element
+                            mysvg.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y)).append("text").attr("transform", "rotate(-90)")
+                              .attr("y", 6)
+                              .attr("dy", "0.71em")
+                              .attr("text-anchor", "end")
+                              .text("Popularity");
+
+                            //adding the label on the y axis
+                            mysvg.append("text")
+                                  .attr("x", -(250/2))
+                                  .attr("y", -margin.left - 11)
+                                  .attr("transform","rotate(-90)")
+                                  .attr("text-anchor","middle")
+                                  .text("Popularity Rating")
+
+                            //adding images to the plot
+                            var node = mysvg.selectAll("g.node")
+                                          .data(artistData, function(d) { return d.name; })
+
+                            var config = {
+                                "avatar_size" : 48
+                              }
+
+                            var nodeEnter = node.enter()
+                                                .append("svg:g")
+                                                .attr("class", "node")
+
+                            var defs = nodeEnter.append("defs")
+                            defs.append('pattern')
+                                .attr("id", function(d) { return "image" + d.name;}  )
+                                .attr("width", function(d) { return (config.avatar_size)})
+                                .attr("height", function(d) { return (config.avatar_size)})
+                                .attr("x",d=> x(d.name))
+                                .attr("y",d=> y(d.popularity))
+                                .attr("patternUnits", "userSpaceOnUse")
+
+                            nodeEnter.append("svg:image")
+                            .attr("class", "avatar")
+                            .attr("xlink:href", function(d) { return (d.images[1]).url;})
+                            .attr("x",d=> x(d.name))
+                            .attr("y",d=> y(d.popularity) - config.avatar_size / 2)
+                            .attr("width", function(d) { return (config.avatar_size)})
+                            .attr("height", function(d) { return (config.avatar_size)})
+                            //.attr("onclick", "playPause()")
+                            .on("mouseenter", function(d) {
+                              //d3.select("text").text(d.name)
+                              d3.select("text").text(d.popularity)
+                              var selectthegraphs = $('.avatar').not(this);
+
+                              d3.selectAll(selectthegraphs)
+                              .transition()
+                              .duration(100)
+                              .attr("opacity", 0);
+
+                              tooltipDiv.select("text")
+                                .style("text-align", "center")
+                                .style("font-size", 11)
+                                .attr("opacity", 0)
+                                .attr("id", "mytext")
+                                .attr("x", x(d.name) - config.avatar_size / 2)
+                                .attr("y", y(d.popularity) - config.avatar_size / 2 - 7)
+                                .text("Artist: " + d.name + ", Popularity: " + d.popularity)
+                                .transition()
+                                .duration(100)
+                                .attr("opacity", 1);
+                            })
+                            .on("mouseout", function(d){
+                              var selectthegraphs = $('.avatar')
+                              d3.selectAll(selectthegraphs)
+                              .transition()
+                              .duration(100)
+                              .attr("opacity", 1);
+                              d3.selectAll("#mytext")
+                              .transition()
+                              .duration(100)
+                              .attr("opacity",0);
+                            })
+
+                            $(document).on("change", "#artists-count-input", function(event) {
+                              var value = d3.select(this).property("value");
+                              var mysvg = d3.select("#mySvg");
+                              mysvg.selectAll("*").remove();
+
+                              artistData = total_artist_data.slice(0, value);
+
+                              // SVG FOR ARTISTS POPULARITY GRAPH
+                              //Setting up the x-axis
+                              var x  = d3.scaleBand().rangeRound([0, svgwidth], .5);
+                              var xAxis = d3.axisBottom().scale(x)
+                              x.domain(artistData.map(d=>d.name))
+
+                              //Setting up the y-axis
+                              var y   = d3.scaleLinear().domain([0, 100]).nice().rangeRound([svgheight, 0]);
+                              var yAxis = d3.axisLeft().scale(y);
+                              y.domain([0,100])
+
+                              const color = d3.scaleOrdinal(d3.schemeCategory10);
+                              var cScale = d3.scaleOrdinal().domain(d=> d).range(d3.schemeCategory10);
+
+                              //creating the tooptip for mouseover events
+                              const tooltipDiv =
+                              mysvg.append("g")
+                              .style("background-color", "white")
+                              .style("border", "solid")
+                              .style("border-width", "2px")
+                              .style("border-radius", "5px")
+                              .style("padding", "5px")
+
+                              tooltipDiv.append("text");
+
+                              //adding x-axis to the svg element
+                              mysvg.append("g").attr("class", "axis axis--x").attr("transform", "translate(0," + svgheight + ")")
+                                .call(xAxis).selectAll("text")
+                                .style("text-anchor", "end")
+                                .attr("dx", "-.8em")
+                                .attr("dy", ".15em")
+                                .attr("transform", function(d) {
+                                          return "rotate(-65)"
+                                });
+                              //adding y-axis to the svg element
+                              mysvg.append("g").attr("class", "axis axis--y").call(d3.axisLeft(y)).append("text").attr("transform", "rotate(-90)")
+                                .attr("y", 6)
+                                .attr("dy", "0.71em")
+                                .attr("text-anchor", "end")
+                                .text("Popularity");
+
+                              //adding the label on the y axis
+                              mysvg.append("text")
+                                    .attr("x", -(250/2))
+                                    .attr("y", -margin.left - 18)
+                                    .attr("transform","rotate(-90)")
+                                    .attr("text-anchor","middle")
+                                    .text("Popularity Rating")
+
+                              //adding images to the plot
+                              var node = mysvg.selectAll("g.node")
+                                            .data(artistData, function(d) { return d.name; })
+
+                              var config = {
+                                  "avatar_size" : 48
+                                }
+
+                              var nodeEnter = node.enter()
+                                                  .append("svg:g")
+                                                  .attr("class", "node")
+
+                              var defs = nodeEnter.append("defs")
+                              defs.append('pattern')
+                                  .attr("id", function(d) { return "image" + d.name;}  )
+                                  .attr("width", function(d) { return (config.avatar_size)})
+                                  .attr("height", function(d) { return (config.avatar_size)})
+                                  .attr("x",d=> x(d.name))
+                                  .attr("y",d=> y(d.popularity))
+                                  .attr("patternUnits", "userSpaceOnUse")
+
+                              nodeEnter.append("svg:image")
+                              .attr("class", "avatar")
+                              .attr("xlink:href", function(d) { return (d.images[1]).url;})
+                              .attr("x",d=> x(d.name))
+                              .attr("y",d=> y(d.popularity) - config.avatar_size / 2)
+                              .attr("width", function(d) { return (config.avatar_size)})
+                              .attr("height", function(d) { return (config.avatar_size)})
+                              //.attr("onclick", "playPause()")
+                              .on("mouseenter", function(d) {
+                                //d3.select("text").text(d.name)
+                                d3.select("text").text(d.popularity)
+                                var selectthegraphs = $('.avatar').not(this);
+
+                                d3.selectAll(selectthegraphs)
+                                .transition()
+                                .duration(100)
+                                .attr("opacity", 0);
+
+                                tooltipDiv.select("text")
+                                  .style("text-align", "center")
+                                  .style("font-size", 11)
+                                  .attr("opacity", 0)
+                                  .attr("id", "mytext")
+                                  .attr("x", x(d.name) - config.avatar_size / 2)
+                                  .attr("y", y(d.popularity) - config.avatar_size / 2 - 7)
+                                  .text("Artist: " + d.name + ", Popularity: " + d.popularity)
+                                  .transition()
+                                  .duration(100)
+                                  .attr("opacity", 1);
+                              })
+                              .on("mouseout", function(d){
+                                var selectthegraphs = $('.avatar')
+                                d3.selectAll(selectthegraphs)
+                                .transition()
+                                .duration(100)
+                                .attr("opacity", 1);
+                                d3.selectAll("#mytext")
+                                .transition()
+                                .duration(100)
+                                .attr("opacity",0);
+                              });
+                            });
+                          }
+                      });
+                    }
+                  });
+
+                  $('#login').hide();
+                  $('#loggedin').show();
+                }
+            });
+          } else {
+              $('#login').show();
+              $('#loggedin').hide();
+          }
+
+          document.getElementById('login-button').addEventListener('click', function() {
+
+            var client_id = '3f2102d0ea8245ff87a57754ae2a38ad'; // Your client id
+            var redirect_uri = 'http://localhost:8888/'; // Your redirect uri
+
+            var state = generateRandomString(16);
+
+            localStorage.setItem(stateKey, state);
+            var scope = 'user-library-read user-top-read user-read-recently-played';
+
+            var url = 'https://accounts.spotify.com/authorize';
+            url += '?response_type=token';
+            url += '&client_id=' + encodeURIComponent(client_id);
+            url += '&scope=' + encodeURIComponent(scope);
+            url += '&redirect_uri=' + encodeURIComponent(redirect_uri);
+            url += '&state=' + encodeURIComponent(state);
+
+            window.location = url;
+          }, false);
+        }
+      })();
+    </script>
+    </html>

@@ -1,1 +1,1 @@
-This Spotify Listening Trends project is an interactive tool that gives you the ability to look at your top tracks on Spotify by album cover and track title/artist. Built using the Spotify’s API, Express, D3.js, jQuery, HTML, and CSS.
+This Spotify Listening Trends project is an interactive tool that gives you the ability to look at your top tracks on Spotify by album cover and track title/artist. Built using Spotify’s API, Express, D3.js, jQuery, HTML, and CSS.
